@@ -214,6 +214,12 @@ Add this configuration to your Claude Desktop config file:
 
 Replace `/absolute/path/to/whoop-mcp/` with the actual path to this directory.
 
+## Dashboard
+
+A local web dashboard is available at `/dashboard?token=<MCP_AUTH_TOKEN>`. It renders your historical Whoop data (30/60/90-day and all-time ranges) with a recovery calendar heatmap, HRV/RHR trends vs. baseline, sleep hours, strain→next-day-recovery correlation, and an **advanced analytics** section: robust EWMA baselines with per-metric z-score bands, an HRV readiness chart with a Smallest-Worthwhile-Change band (Plews/Vesterinen method), and an Acute:Chronic Workload Ratio (ACWR) chart on strain.
+
+See [`docs/ESTADISTICA.md`](docs/ESTADISTICA.md) for a detailed explanation of every statistic — what each means, which values are good or bad, and how to use them to decide daily training load.
+
 ## Available Tools
 
 The server provides five main tools for accessing your Whoop data:

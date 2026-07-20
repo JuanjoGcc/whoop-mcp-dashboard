@@ -171,6 +171,38 @@
     </div>
   </div>
 
+  <h2 style="font-size:16px;font-weight:650;margin-top:8px">Análisis avanzado</h2>
+  <div class="sub" style="margin-top:-8px">¿Qué significa cada métrica? Ver <a href="https://github.com/JuanjoGcc/whoop-mcp-dashboard/blob/main/docs/ESTADISTICA.md" style="color:var(--series-1)">la guía de estadística</a></div>
+
+  <div class="card">
+    <h2>Readiness HRV — media móvil de 7 días de ln(HRV) con banda de cambio significativo</h2>
+    <div class="hint" id="swc-hint">Dentro de la banda = normal · bajo la banda = fatiga · sobre la banda = supercompensación</div>
+    <div id="chart-swc"></div>
+    <div class="hm-scale" style="justify-content:flex-start">Método Plews/Vesterinen: SWC = ½ × SD de tu ln(HRV). Los cambios menores a la banda son ruido.</div>
+  </div>
+
+  <div class="card">
+    <h2>Carga de entrenamiento — ratio agudo:crónico (ACWR)</h2>
+    <div class="hint" id="acwr-hint">strain 7d ÷ 28d · zona óptima 0.8–1.3</div>
+    <div id="chart-acwr"></div>
+    <div class="hm-scale" style="justify-content:flex-start">
+      <i style="background:var(--zone-bad)"></i> riesgo &gt;1.5 &nbsp;
+      <i style="background:var(--zone-warn)"></i> precaución 1.3–1.5 &nbsp;
+      <i style="background:var(--zone-good)"></i> óptimo 0.8–1.3 &nbsp;
+      <i style="background:var(--baseline)"></i> carga baja &lt;0.8
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Estado por métrica — z-score robusto vs tu baseline EWMA</h2>
+    <div class="hint">Verde ±1 SD (normal) · amarillo hasta ±2 · rojo más allá. Pulso y respiración van invertidos: arriba = mejor. Puntos rojos = días atípicos</div>
+    <div class="grid-2" style="margin-top:8px">
+      <div><div class="hint" style="margin:0 0 2px">HRV</div><div id="chart-z-hrv"></div></div>
+      <div><div class="hint" style="margin:0 0 2px">Pulso en reposo</div><div id="chart-z-rhr"></div></div>
+      <div><div class="hint" style="margin:0 0 2px">Frecuencia respiratoria</div><div id="chart-z-resp"></div></div>
+    </div>
+  </div>
+
   <div class="card">
     <h2>Récords del período</h2>
     <div class="hint" style="margin-bottom:12px">Lo que pondrías en redes</div>
@@ -369,6 +401,200 @@ function heatmap(days) {
     `<i style="background:var(--zone-bad)"></i> Roja &lt;34% &nbsp; <i style="background:var(--zone-warn)"></i> Amarilla 34–66% &nbsp; <i style="background:var(--zone-good)"></i> Verde ≥67%`;
 }
 
+// ---- statistics helpers ----
+
+// Trailing rolling mean over present values in window w
+function rollingMean(arr, w) {
+  return arr.map((_, i) => {
+    const win = arr.slice(Math.max(0, i - w + 1), i + 1).filter((v) => v != null);
+    return win.length ? win.reduce((a, b) => a + b, 0) / win.length : null;
+  });
+}
+function rollingSD(arr, w) {
+  return arr.map((_, i) => {
+    const win = arr.slice(Math.max(0, i - w + 1), i + 1).filter((v) => v != null);
+    if (win.length < 2) return null;
+    const m = win.reduce((a, b) => a + b, 0) / win.length;
+    return Math.sqrt(win.reduce((a, b) => a + (b - m) ** 2, 0) / (win.length - 1));
+  });
+}
+
+// Winsorized EWMA baseline + robust z-score (my-whoop baselines.py method)
+// halfLife 14 nights for center, 21 for spread; floor = min meaningful spread per metric
+function robustSeries(days, field, floor) {
+  const lamC = 1 - Math.pow(0.5, 1 / 14);
+  const lamS = 1 - Math.pow(0.5, 1 / 21);
+  let base = null, spread = null;
+  return days.map((d) => {
+    const v = d[field];
+    if (v == null) return { baseline: base, spread, z: null, value: null };
+    if (base === null) { base = v; spread = floor; return { baseline: base, spread, z: 0, value: v }; }
+    // z vs the baseline as it stood BEFORE folding today in
+    const z = (v - base) / (1.253 * spread);
+    const withinReject = Math.abs(v - base) <= 5 * spread; // hard-reject wild nights
+    if (withinReject) {
+      const clamped = Math.min(base + 3 * spread, Math.max(base - 3 * spread, v)); // winsorize
+      base = lamC * clamped + (1 - lamC) * base;
+      spread = Math.max(floor, lamS * Math.abs(clamped - base) + (1 - lamS) * spread);
+    }
+    return { baseline: base, spread, z, value: v };
+  });
+}
+
+function xAxisTicks(days, x, H, P) {
+  const step = Math.ceil(days.length / 7);
+  return days.map((d, i) => (i % step === 0 ? `<text x="${x(i)}" y="${H - 4}" text-anchor="middle">${fmtDate(d.date)}</text>` : "")).join("");
+}
+
+// ---- (b) ln(HRV) 7d rolling with Smallest Worthwhile Change band ----
+function swcChart(el, days) {
+  const ln = days.map((d) => (d.hrv != null ? Math.log(d.hrv) : null));
+  if (ln.filter((v) => v != null).length < 10) { el.innerHTML = "<div class='hint'>Sin datos suficientes</div>"; return; }
+  const line7 = rollingMean(ln, 7);
+  const c30 = rollingMean(ln, 30), sd30 = rollingSD(ln, 30);
+  const lineMs = line7.map((v) => (v != null ? Math.exp(v) : null));
+  const bandLo = c30.map((c, i) => (c != null && sd30[i] != null ? Math.exp(c - 0.5 * sd30[i]) : null));
+  const bandHi = c30.map((c, i) => (c != null && sd30[i] != null ? Math.exp(c + 0.5 * sd30[i]) : null));
+
+  const W = 560, H = 190, P = { t: 8, r: 8, b: 20, l: 34 };
+  const all = [...lineMs, ...bandLo, ...bandHi].filter((v) => v != null);
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.12 || 5; lo -= pad; hi += pad;
+  const x = (i) => P.l + (i / Math.max(1, days.length - 1)) * (W - P.l - P.r);
+  const y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + ((hi - lo) * i) / 4;
+    svg += `<line x1="${P.l}" y1="${y(v)}" x2="${W - P.r}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${P.l - 6}" y="${y(v) + 3}" text-anchor="end">${Math.round(v)}</text>`;
+  }
+  // SWC band as one area (ponytail: assumes mostly-contiguous days; small gaps just clip)
+  let top = "", bot = "";
+  const idx = days.map((_, i) => i).filter((i) => bandHi[i] != null);
+  idx.forEach((i, k) => { top += `${k ? "L" : "M"}${x(i).toFixed(1)},${y(bandHi[i]).toFixed(1)}`; });
+  [...idx].reverse().forEach((i) => { bot += `L${x(i).toFixed(1)},${y(bandLo[i]).toFixed(1)}`; });
+  svg += `<path d="${top}${bot}Z" fill="var(--series-1)" fill-opacity="0.10"/>`;
+  // line
+  let path = "", pen = false;
+  days.forEach((d, i) => { if (lineMs[i] == null) { pen = false; return; } path += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(lineMs[i]).toFixed(1)}`; pen = true; });
+  svg += `<path d="${path}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round"/>`;
+  svg += xAxisTicks(days, x, H, P);
+  svg += `<line id="xhair" y1="${P.t}" y2="${H - P.b}" stroke="var(--baseline)" stroke-width="1" visibility="hidden"/>`;
+  svg += `<circle id="xdot" r="4" stroke="var(--surface)" stroke-width="2" visibility="hidden"/></svg>`;
+  el.innerHTML = svg;
+
+  // status of latest day
+  let lastI = -1; for (let i = days.length - 1; i >= 0; i--) if (lineMs[i] != null && bandLo[i] != null) { lastI = i; break; }
+  const hint = document.getElementById("swc-hint");
+  if (lastI >= 0) {
+    const state = lineMs[lastI] < bandLo[lastI] ? ["fatiga / carga acumulada", "var(--zone-bad)"] :
+      lineMs[lastI] > bandHi[lastI] ? ["supercompensación (o saturación parasimpática)", "var(--zone-good)"] :
+      ["dentro de tu rango normal", "var(--zone-warn)"];
+    hint.innerHTML = `Hoy: <b style="color:${state[1]}">${state[0]}</b> · HRV suavizado ${Math.round(lineMs[lastI])} ms, banda ${Math.round(bandLo[lastI])}–${Math.round(bandHi[lastI])} ms`;
+  }
+
+  const node = el.querySelector("svg"), xhair = node.querySelector("#xhair"), xdot = node.querySelector("#xdot");
+  node.addEventListener("mousemove", (ev) => {
+    const rect = node.getBoundingClientRect();
+    const i = Math.max(0, Math.min(days.length - 1, Math.round((((ev.clientX - rect.left) / rect.width) * W - P.l) / (W - P.l - P.r) * (days.length - 1))));
+    if (lineMs[i] == null) return;
+    xhair.setAttribute("x1", x(i)); xhair.setAttribute("x2", x(i)); xhair.setAttribute("visibility", "visible");
+    xdot.setAttribute("cx", x(i)); xdot.setAttribute("cy", y(lineMs[i]));
+    const below = bandLo[i] != null && lineMs[i] < bandLo[i], above = bandHi[i] != null && lineMs[i] > bandHi[i];
+    xdot.setAttribute("fill", below ? "var(--zone-bad)" : above ? "var(--zone-good)" : "var(--series-1)");
+    xdot.setAttribute("visibility", "visible");
+    showTip(`<b>${fmtDate(days[i].date)}</b><br>HRV suavizado (7d): <b>${Math.round(lineMs[i])} ms</b><br>Banda normal: <b>${bandLo[i] ? Math.round(bandLo[i]) : "—"}–${bandHi[i] ? Math.round(bandHi[i]) : "—"} ms</b>`, ev);
+  });
+  node.addEventListener("mouseleave", () => { xhair.setAttribute("visibility", "hidden"); xdot.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+// ---- (c) Acute:Chronic Workload Ratio on strain ----
+function acwrChart(el, days) {
+  const strain = days.map((d) => d.strain);
+  const ratio = days.map((_, i) => {
+    const acuteWin = strain.slice(Math.max(0, i - 6), i + 1).filter((v) => v != null);
+    const chronicWin = strain.slice(Math.max(0, i - 27), i + 1).filter((v) => v != null);
+    if (i < 27 || chronicWin.length < 21) return null; // needs ~4 weeks of history
+    const acute = acuteWin.reduce((a, b) => a + b, 0) / acuteWin.length;
+    const chronic = chronicWin.reduce((a, b) => a + b, 0) / chronicWin.length;
+    return chronic > 0 ? acute / chronic : null;
+  });
+  if (ratio.filter((v) => v != null).length < 2) { el.innerHTML = "<div class='hint'>Necesitas ~28 días de datos para el ACWR</div>"; return; }
+
+  const W = 560, H = 190, P = { t: 8, r: 8, b: 20, l: 30 };
+  const hi = 2, lo = 0;
+  const x = (i) => P.l + (i / Math.max(1, days.length - 1)) * (W - P.l - P.r);
+  const y = (v) => P.t + (1 - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * (H - P.t - P.b);
+  const zone = (v, x1, x2, color) => `<rect x="${P.l}" y="${y(x2)}" width="${W - P.l - P.r}" height="${y(x1) - y(x2)}" fill="${color}" fill-opacity="0.12"/>`;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  svg += zone(0, 1.5, hi, "var(--zone-bad)");       // danger >1.5
+  svg += zone(0, 1.3, 1.5, "var(--zone-warn)");     // caution 1.3-1.5
+  svg += zone(0, 0.8, 1.3, "var(--zone-good)");     // sweet spot
+  svg += zone(0, lo, 0.8, "var(--baseline)");       // undertrained <0.8
+  [0.8, 1.3, 1.5].forEach((v) => { svg += `<line x1="${P.l}" y1="${y(v)}" x2="${W - P.r}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${W - P.r}" y="${y(v) - 3}" text-anchor="end">${v}</text>`; });
+  let path = "", pen = false;
+  days.forEach((d, i) => { if (ratio[i] == null) { pen = false; return; } path += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(ratio[i]).toFixed(1)}`; pen = true; });
+  svg += `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/>`;
+  svg += xAxisTicks(days, x, H, P);
+  svg += `<circle id="xdot" r="4" stroke="var(--surface)" stroke-width="2" visibility="hidden"/></svg>`;
+  el.innerHTML = svg;
+
+  let lastI = -1; for (let i = ratio.length - 1; i >= 0; i--) if (ratio[i] != null) { lastI = i; break; }
+  const hint = document.getElementById("acwr-hint");
+  if (lastI >= 0) {
+    const r = ratio[lastI];
+    const st = r > 1.5 ? ["riesgo alto", "var(--zone-bad)"] : r >= 0.8 && r <= 1.3 ? ["zona óptima", "var(--zone-good)"] : r > 1.3 ? ["precaución", "var(--zone-warn)"] : ["carga baja", "var(--ink-2)"];
+    hint.innerHTML = `Hoy: <b style="color:${st[1]}">${r.toFixed(2)} — ${st[0]}</b> · óptimo 0.8–1.3, riesgo &gt;1.5`;
+  }
+  const node = el.querySelector("svg"), xdot = node.querySelector("#xdot");
+  node.addEventListener("mousemove", (ev) => {
+    const rect = node.getBoundingClientRect();
+    const i = Math.max(0, Math.min(days.length - 1, Math.round((((ev.clientX - rect.left) / rect.width) * W - P.l) / (W - P.l - P.r) * (days.length - 1))));
+    if (ratio[i] == null) return;
+    xdot.setAttribute("cx", x(i)); xdot.setAttribute("cy", y(ratio[i])); xdot.setAttribute("fill", "var(--ink)"); xdot.setAttribute("visibility", "visible");
+    showTip(`<b>${fmtDate(days[i].date)}</b><br>ACWR: <b>${ratio[i].toFixed(2)}</b><br>strain 7d ÷ 28d`, ev);
+  });
+  node.addEventListener("mouseleave", () => { xdot.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+// ---- (a) robust z-score band chart per metric ----
+function zBandChart(el, days, { field, floor, invert, unit }) {
+  const series = robustSeries(days, field, floor);
+  const z = series.map((s) => (s.z == null ? null : invert ? -s.z : s.z));
+  if (z.filter((v) => v != null).length < 5) { el.innerHTML = "<div class='hint'>Sin datos</div>"; return; }
+  const W = 560, H = 130, P = { t: 6, r: 8, b: 18, l: 22 };
+  const hi = 3, lo = -3;
+  const x = (i) => P.l + (i / Math.max(1, days.length - 1)) * (W - P.l - P.r);
+  const y = (v) => P.t + (1 - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * (H - P.t - P.b);
+  const band = (a, b, c) => `<rect x="${P.l}" y="${y(b)}" width="${W - P.l - P.r}" height="${y(a) - y(b)}" fill="${c}" fill-opacity="0.12"/>`;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  svg += band(2, 3, "var(--zone-bad)") + band(1, 2, "var(--zone-warn)") + band(-1, 1, "var(--zone-good)") + band(-2, -1, "var(--zone-warn)") + band(-3, -2, "var(--zone-bad)");
+  svg += `<line x1="${P.l}" y1="${y(0)}" x2="${W - P.r}" y2="${y(0)}" stroke="var(--baseline)" stroke-width="1"/>`;
+  let path = "", pen = false;
+  days.forEach((d, i) => { if (z[i] == null) { pen = false; return; } path += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(z[i]).toFixed(1)}`; pen = true; });
+  svg += `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-linejoin="round"/>`;
+  // flag out-of-band days
+  days.forEach((d, i) => {
+    if (z[i] == null || Math.abs(z[i]) < 2) return;
+    svg += `<circle cx="${x(i)}" cy="${y(z[i])}" r="3" fill="var(--zone-bad)" stroke="var(--surface)" stroke-width="1.5"/>`;
+  });
+  svg += xAxisTicks(days, x, H, P);
+  svg += `<circle id="xdot" r="3.5" fill="var(--ink)" stroke="var(--surface)" stroke-width="1.5" visibility="hidden"/></svg>`;
+  el.innerHTML = svg;
+  const node = el.querySelector("svg"), xdot = node.querySelector("#xdot");
+  node.addEventListener("mousemove", (ev) => {
+    const rect = node.getBoundingClientRect();
+    const i = Math.max(0, Math.min(days.length - 1, Math.round((((ev.clientX - rect.left) / rect.width) * W - P.l) / (W - P.l - P.r) * (days.length - 1))));
+    if (z[i] == null) return;
+    xdot.setAttribute("cx", x(i)); xdot.setAttribute("cy", y(z[i])); xdot.setAttribute("visibility", "visible");
+    const zz = z[i], label = Math.abs(zz) < 1 ? "normal" : Math.abs(zz) < 2 ? "leve" : "atípico";
+    showTip(`<b>${fmtDate(days[i].date)}</b><br>${field}: <b>${series[i].value}${unit || ""}</b><br>baseline: <b>${series[i].baseline != null ? series[i].baseline.toFixed(1) : "—"}${unit || ""}</b><br>z-score: <b>${zz.toFixed(2)}</b> (${label})`, ev);
+  });
+  node.addEventListener("mouseleave", () => { xdot.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
 // ---- tiles + records + table ----
 function tiles(days) {
   const last = [...days].reverse().find((d) => d.recovery != null) || {};
@@ -439,6 +665,11 @@ async function load(days) {
     { name: "Baseline", unit: " bpm", color: css("--baseline"), get: (d) => d.rhrBaseline }]);
   scatterChart(document.getElementById("chart-scatter"), data);
   columnChart(document.getElementById("chart-sleep"), data);
+  swcChart(document.getElementById("chart-swc"), data);
+  acwrChart(document.getElementById("chart-acwr"), data);
+  zBandChart(document.getElementById("chart-z-hrv"), data, { field: "hrv", floor: 5, invert: false, unit: " ms" });
+  zBandChart(document.getElementById("chart-z-rhr"), data, { field: "rhr", floor: 2, invert: true, unit: " bpm" });
+  zBandChart(document.getElementById("chart-z-resp"), data, { field: "respRate", floor: 0.5, invert: true, unit: "" });
   records(data);
   table(data);
 }
