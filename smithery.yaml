@@ -4,12 +4,16 @@ startCommand:
   type: "http"
   configSchema:
     type: "object"
-    required: ["whoopEmail", "whoopPassword"]
     properties:
+      whoopRefreshToken:
+        type: "string"
+        title: "Whoop Refresh Token"
+        description: "Refresh token obtained by running `bun run login` locally (recommended — required if your account uses email OTP)"
+        format: "password"
       whoopEmail:
         type: "string"
         title: "Whoop Email"
-        description: "Your Whoop account email address"
+        description: "Your Whoop account email address (only works for accounts without email OTP)"
       whoopPassword:
         type: "string"
         title: "Whoop Password"

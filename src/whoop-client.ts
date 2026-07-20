@@ -6,11 +6,44 @@ import type {
   TokenData,
 } from "./types";
 
+export const WHOOP_CLIENT_ID = "475b3ab3-7326-47f7-aedd-762f3a425822";
+
+/**
+ * Call Whoop's Cognito auth endpoint (InitiateAuth / RespondToAuthChallenge).
+ */
+// ponytail: auth always hits prod, ignores config.baseUrl (only used for API calls)
+export async function cognitoCall(
+  target: "InitiateAuth" | "RespondToAuthChallenge",
+  payload: object
+): Promise<LoginResponse> {
+  const response = await fetch("https://api.prod.whoop.com/auth-service/v3/whoop", {
+    method: "POST",
+    headers: {
+      Accept: "*/*",
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": `AWSCognitoIdentityProviderService.${target}`,
+      // Whoop's WAF 403s non-iOS user agents; impersonate the AWS Swift SDK
+      "User-Agent":
+        "aws-sdk-swift/1.5.86 ua/2.1 api/cognito_identity_provider#1.5.86 os/ios#26.3.1 lang/swift#5.10 m/D,N,Z,b",
+      "amz-sdk-invocation-id": crypto.randomUUID(),
+      "amz-sdk-request": "attempt=1; max=1",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`${target} failed: ${response.status} ${response.statusText} — ${body}`);
+  }
+
+  return (await response.json()) as LoginResponse;
+}
+
 export class WhoopClient {
   private config: WhoopConfig;
   private baseUrl: string;
   private tokenData: TokenData | null = null;
-  private readonly CLIENT_ID = "";
 
   constructor(config: WhoopConfig) {
     this.config = config;
@@ -18,47 +51,25 @@ export class WhoopClient {
   }
 
   /**
-   * Login with email and password to get access token
+   * Get an access token — via refresh token if configured, otherwise
+   * email/password (only works for accounts without email OTP enabled).
    */
-  async login(email?: string, password?: string): Promise<void> {
-    const loginEmail = email || this.config.email;
-    const loginPassword = password || this.config.password;
-
-    if (!loginEmail || !loginPassword) {
-      throw new Error("Email and password are required for login");
-    }
-
-    const url = `${this.baseUrl}/auth-service/v3/whoop`;
-
+  async login(): Promise<void> {
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          Host: "api.prod.whoop.com",
-          Accept: "*/*",
-          "Content-Type": "application/x-amz-json-1.1",
-          "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
-        },
-        body: JSON.stringify({
-          AuthParameters: {
-            USERNAME: loginEmail,
-            PASSWORD: loginPassword,
-          },
-          ClientId: this.CLIENT_ID,
-          AuthFlow: "USER_PASSWORD_AUTH",
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Login failed: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const data = (await response.json()) as LoginResponse;
+      const data = this.config.refreshToken
+        ? await cognitoCall("InitiateAuth", {
+            AuthFlow: "REFRESH_TOKEN_AUTH",
+            ClientId: WHOOP_CLIENT_ID,
+            AuthParameters: { REFRESH_TOKEN: this.config.refreshToken },
+          })
+        : await this.passwordLogin();
 
       if (!data.AuthenticationResult) {
-        throw new Error("Login failed: No authentication result received");
+        throw new Error(
+          data.ChallengeName
+            ? `Whoop requires a ${data.ChallengeName} challenge — run \`bun run login\` once to obtain WHOOP_REFRESH_TOKEN`
+            : "No authentication result received"
+        );
       }
 
       this.tokenData = {
@@ -71,6 +82,18 @@ export class WhoopClient {
       }
       throw error;
     }
+  }
+
+  private async passwordLogin(): Promise<LoginResponse> {
+    const { email, password } = this.config;
+    if (!email || !password) {
+      throw new Error("Email and password are required for login");
+    }
+    return cognitoCall("InitiateAuth", {
+      AuthFlow: "USER_PASSWORD_AUTH",
+      ClientId: WHOOP_CLIENT_ID,
+      AuthParameters: { USERNAME: email, PASSWORD: password },
+    });
   }
 
   /**

@@ -24,17 +24,12 @@ cd whoop-mcp
 2. **Create a `.env` file with your WHOOP credentials:**
 
 ```bash
-echo "WHOOP_EMAIL=your-email@example.com" > .env
-echo "WHOOP_PASSWORD=your-password" >> .env
+echo "WHOOP_EMAIL='your-email@example.com'" > .env
+echo "WHOOP_PASSWORD='your-password'" >> .env
 echo "PORT=3000" >> .env
 ```
 
-Or set as environment variables:
-
-```bash
-export WHOOP_EMAIL='your-email@example.com'
-export WHOOP_PASSWORD='your-password'
-```
+> ⚠️ **Quote your values.** Bun's `.env` parser treats an unquoted `#` as the start of an inline comment — a password containing `#` gets silently truncated and login fails with "Incorrect username or password".
 
 3. **Install dependencies:**
 
@@ -42,7 +37,17 @@ export WHOOP_PASSWORD='your-password'
 bun install
 ```
 
-4. **Start the server:**
+4. **Log in once to get a refresh token (required if your account uses email OTP):**
+
+Whoop requires an email OTP code on password login. Run the interactive login script once — it prompts for the code sent to your email and saves a long-lived `WHOOP_REFRESH_TOKEN` to your `.env`:
+
+```bash
+bun run login
+```
+
+After this, the server authenticates with the refresh token and never needs the OTP again. If the refresh token ever expires, just re-run `bun run login`.
+
+5. **Start the server:**
 
 ```bash
 bun run start
@@ -101,6 +106,7 @@ This server is configured to work with [Smithery](https://smithery.ai/), a platf
 
 1. **Configuration via Query Parameters**: Smithery passes your credentials as query parameters to the `/mcp` endpoint (defined in `smithery.yaml`):
 
+   - `whoopRefreshToken` - Refresh token from `bun run login` (recommended — required if your account uses email OTP)
    - `whoopEmail` - Your Whoop account email
    - `whoopPassword` - Your Whoop account password
    - `mcpAuthToken` - Optional authentication token
@@ -119,20 +125,26 @@ The server supports two methods for providing credentials:
 
 1. **Query Parameters** (used by Smithery): Pass credentials as query parameters to the `/mcp` endpoint
 
+   - `whoopRefreshToken` - Refresh token obtained via `bun run login` (recommended)
    - `whoopEmail` - Your Whoop account email
    - `whoopPassword` - Your Whoop account password
    - `mcpAuthToken` - Optional authentication token
 
 2. **Environment Variables** (used for local/Docker deployment):
 
-| Variable         | Required | Default | Description                                    |
-| ---------------- | -------- | ------- | ---------------------------------------------- |
-| `WHOOP_EMAIL`    | Yes      | -       | Your Whoop account email                       |
-| `WHOOP_PASSWORD` | Yes      | -       | Your Whoop account password                    |
-| `MCP_AUTH_TOKEN` | No       | -       | Optional authentication token for MCP requests |
-| `PORT`           | No       | 3000    | Server port                                    |
+| Variable              | Required | Default | Description                                                      |
+| --------------------- | -------- | ------- | ---------------------------------------------------------------- |
+| `WHOOP_REFRESH_TOKEN` | Yes\*    | -       | Refresh token saved by `bun run login` (recommended)             |
+| `WHOOP_EMAIL`         | Yes\*    | -       | Your Whoop account email                                         |
+| `WHOOP_PASSWORD`      | Yes\*    | -       | Your Whoop account password (quote it in `.env` if it has a `#`) |
+| `MCP_AUTH_TOKEN`      | No       | -       | Optional authentication token for MCP requests                   |
+| `PORT`                | No       | 3000    | Server port                                                      |
+
+\* Either `WHOOP_REFRESH_TOKEN` or `WHOOP_EMAIL`+`WHOOP_PASSWORD` is required. Password-only login works exclusively for accounts without email OTP enabled — most accounts need the refresh token (see Quick Start step 4).
 
 The server will check query parameters first, then fall back to environment variables if not provided.
+
+**Note:** `bun --watch` (the `dev` script) does not re-read `.env` on reload — restart the server after changing environment variables.
 
 ### Optional Authentication
 
@@ -176,8 +188,7 @@ Add this configuration to your Claude Desktop config file:
       "command": "bun",
       "args": ["run", "/absolute/path/to/whoop-mcp/index.ts"],
       "env": {
-        "WHOOP_EMAIL": "your-email@example.com",
-        "WHOOP_PASSWORD": "your-password"
+        "WHOOP_REFRESH_TOKEN": "your-refresh-token-from-bun-run-login"
       }
     }
   }
@@ -193,8 +204,7 @@ Add this configuration to your Claude Desktop config file:
       "command": "bun",
       "args": ["run", "/absolute/path/to/whoop-mcp/index.ts"],
       "env": {
-        "WHOOP_EMAIL": "your-email@example.com",
-        "WHOOP_PASSWORD": "your-password",
+        "WHOOP_REFRESH_TOKEN": "your-refresh-token-from-bun-run-login",
         "MCP_AUTH_TOKEN": "your-secret-token-here"
       }
     }
@@ -343,19 +353,21 @@ Retrieves comprehensive healthspan analysis including WHOOP Age (biological age)
 
 ## How It Works
 
-The server automatically handles authentication:
+Whoop uses AWS Cognito for authentication, and most accounts require an email OTP challenge on password login. The server handles this with a two-phase flow:
 
-1. Logs in with your email/password on first request
-2. Stores the access token (valid for 24 hours)
-3. Automatically re-authenticates before token expires
-4. Retries failed requests after re-authentication
+1. **One-time setup** (`bun run login`): logs in with email/password, prompts for the OTP code sent to your email, and saves the resulting long-lived `WHOOP_REFRESH_TOKEN` to `.env`
+2. **Runtime**: the server exchanges the refresh token for a short-lived access token (`REFRESH_TOKEN_AUTH`) — no password or OTP needed
+3. Access tokens are stored in memory only and automatically renewed before they expire
+4. Failed requests are retried after re-authentication
+
+If no refresh token is configured, the server falls back to direct email/password login, which only works for accounts without email OTP enabled.
 
 ## Security
 
 ### Best Practices
 
-- **Never commit** your `.env` file or share your WHOOP credentials
-- The server stores Whoop authentication tokens in memory only (they expire after 24 hours)
+- **Never commit** your `.env` file or share your WHOOP credentials — the `WHOOP_REFRESH_TOKEN` grants full account access, treat it like a password
+- The server stores Whoop access tokens in memory only (they expire and are renewed automatically)
 - **Use `MCP_AUTH_TOKEN`** when exposing the server to a network or untrusted clients
 - Generate strong, random tokens for `MCP_AUTH_TOKEN` (e.g., using `openssl rand -hex 32`)
 - When running in production or on a network, **always** set `MCP_AUTH_TOKEN`

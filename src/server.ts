@@ -9,6 +9,7 @@ import { registerHealthspanTools } from "./tools/healthspan";
 export interface WhoopMcpServerConfig {
   email?: string;
   password?: string;
+  refreshToken?: string;
 }
 
 export function createWhoopMcpServer(config: WhoopMcpServerConfig) {

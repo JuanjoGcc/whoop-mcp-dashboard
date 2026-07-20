@@ -1,6 +1,7 @@
 export interface WhoopConfig {
   email?: string;
   password?: string;
+  refreshToken?: string;
   baseUrl?: string;
   userId?: string;
   accountId?: string;
@@ -16,11 +17,11 @@ export interface AuthenticationResult {
 }
 
 export interface LoginResponse {
-  ChallengeName: null;
-  Session: null;
-  ChallengeParameters: Record<string, unknown>;
-  AuthenticationResult: AuthenticationResult;
-  AvailableChallenges: null;
+  ChallengeName: string | null;
+  Session: string | null;
+  ChallengeParameters: Record<string, string>;
+  AuthenticationResult: AuthenticationResult | null;
+  AvailableChallenges: string[] | null;
 }
 
 export interface TokenData {

@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whoop Dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --series-1:    #008300;  /* green */
+    --up-good:     #006300;
+    /* Whoop recovery zones (status palette: good/warning/critical) */
+    --zone-good:   #0ca30c;
+    --zone-warn:   #fab219;
+    --zone-bad:    #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface:     #1a1a19;
+      --ink:         #ffffff;
+      --ink-2:       #c3c2b7;
+      --muted:       #898781;
+      --grid:        #2c2c2a;
+      --baseline:    #383835;
+      --border:      rgba(255,255,255,0.10);
+      --series-1:    #008300;
+      --up-good:     #0ca30c;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 24px 16px 64px;
+  }
+  main { max-width: 1080px; margin: 0 auto; display: grid; gap: 16px; }
+  h1 { font-size: 20px; font-weight: 650; }
+  .sub { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+
+  .filters { display: flex; gap: 8px; }
+  .filters button {
+    font: inherit; font-size: 13px; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px; cursor: pointer;
+  }
+  .filters button[aria-pressed="true"] { color: var(--ink); font-weight: 650; border-color: var(--ink-2); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
+  .card .hint { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+  .tile .label { font-size: 12px; color: var(--ink-2); }
+  .tile .value { font-size: 32px; font-weight: 650; margin-top: 4px; }
+  .tile .value.hero { font-size: 48px; }
+  .tile .delta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .tile .delta.good { color: var(--up-good); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  svg { display: block; width: 100%; }
+  svg text { font-family: inherit; font-size: 10px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+
+  /* heatmap */
+  .heatmap { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
+  .hm-week { display: grid; grid-template-rows: repeat(7, 14px); gap: 3px; }
+  .hm-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--page); border: 1px solid var(--grid); }
+  .hm-cell[data-v] { border: none; cursor: default; }
+  .hm-scale { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .hm-scale i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .records { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .record { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .record .label { font-size: 12px; color: var(--ink-2); }
+  .record .value { font-size: 22px; font-weight: 650; margin-top: 2px; }
+  .record .when { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; color: var(--ink-2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12); max-width: 240px;
+  }
+  #tooltip b { color: var(--ink); font-weight: 600; }
+
+  details { border-top: 1px solid var(--grid); padding-top: 12px; }
+  summary { font-size: 13px; color: var(--ink-2); cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; font-size: 12px; }
+  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-2); font-weight: 600; }
+
+  #status { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>Whoop Dashboard</h1>
+    <div class="sub">Tus datos, más allá de la app</div>
+  </div>
+
+  <div class="filters" role="group" aria-label="Rango de fechas">
+    <button data-days="30">30 días</button>
+    <button data-days="60" aria-pressed="true">60 días</button>
+    <button data-days="90">90 días</button>
+    <button data-days="all">Todo</button>
+  </div>
+
+  <div id="status">Cargando datos de Whoop… (la primera vez toma un rato, después queda en caché)</div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2>Calendario de recovery</h2>
+    <div class="hint">Cada celda es un día, coloreada por zona de recovery</div>
+    <div class="heatmap" id="heatmap"></div>
+    <div class="hm-scale" id="hm-scale"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recovery diario</h2>
+    <div class="hint">% de recovery por día</div>
+    <div id="chart-recovery"></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h2>HRV</h2>
+      <div class="hint">ms, vs tu baseline de 30 días</div>
+      <div class="legend"><span><i style="background:var(--series-1)"></i>HRV</span><span><i style="background:var(--baseline)"></i>Baseline 30d</span></div>
+      <div id="chart-hrv"></div>
+    </div>
+    <div class="card">
+      <h2>Pulso en reposo</h2>
+      <div class="hint">bpm, vs tu baseline de 30 días (más bajo es mejor)</div>
+      <div class="legend"><span><i style="background:var(--series-1)"></i>RHR</span><span><i style="background:var(--baseline)"></i>Baseline 30d</span></div>
+      <div id="chart-rhr"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h2>Strain de hoy → recovery de mañana</h2>
+      <div class="hint" id="corr-hint">Tu curva dosis-respuesta personal</div>
+      <div id="chart-scatter"></div>
+    </div>
+    <div class="card">
+      <h2>Horas de sueño</h2>
+      <div class="hint">Horas dormidas por noche</div>
+      <div id="chart-sleep"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Récords del período</h2>
+    <div class="hint" style="margin-bottom:12px">Lo que pondrías en redes</div>
+    <div class="records" id="records"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Ver todos los datos en tabla</summary>
+      <div style="overflow-x:auto"><table id="data-table"></table></div>
+    </details>
+  </div>
+</main>
+
+<div id="tooltip"></div>
+
+<script>
+const token = new URLSearchParams(location.search).get("token");
+const tooltip = document.getElementById("tooltip");
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const fmtDate = (iso) => new Date(iso + "T12:00").toLocaleDateString("es", { day: "numeric", month: "short" });
+
+function showTip(html, ev) {
+  tooltip.innerHTML = html;
+  tooltip.style.display = "block";
+  const x = Math.min(ev.clientX + 12, innerWidth - tooltip.offsetWidth - 8);
+  const y = Math.min(ev.clientY + 12, innerHeight - tooltip.offsetHeight - 8);
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+}
+const hideTip = () => (tooltip.style.display = "none");
+
+// ---- generic SVG line chart with crosshair + tooltip ----
+function lineChart(el, days, seriesDefs, { yMin = null, yMax = null } = {}) {
+  const W = 560, H = 180, P = { t: 8, r: 8, b: 20, l: 34 };
+  const values = seriesDefs.flatMap((s) => days.map(s.get)).filter((v) => v != null);
+  if (!values.length) { el.innerHTML = "<div class='hint'>Sin datos</div>"; return; }
+  let lo = yMin ?? Math.min(...values), hi = yMax ?? Math.max(...values);
+  if (yMin == null) { const pad = (hi - lo) * 0.15 || 5; lo -= pad; hi += pad; }
+  const x = (i) => P.l + (i / Math.max(1, days.length - 1)) * (W - P.l - P.r);
+  const y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = lo + ((hi - lo) * i) / ticks, yy = y(v);
+    svg += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    svg += `<text x="${P.l - 6}" y="${yy + 3}" text-anchor="end">${Math.round(v)}</text>`;
+  }
+  const step = Math.ceil(days.length / 7);
+  days.forEach((d, i) => {
+    if (i % step === 0) svg += `<text x="${x(i)}" y="${H - 4}" text-anchor="middle">${fmtDate(d.date)}</text>`;
+  });
+  for (const s of seriesDefs) {
+    let path = "", pen = false;
+    days.forEach((d, i) => {
+      const v = s.get(d);
+      if (v == null) { pen = false; return; }
+      path += `${pen ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+      pen = true;
+    });
+    svg += `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  svg += `<line id="xhair" y1="${P.t}" y2="${H - P.b}" stroke="var(--baseline)" stroke-width="1" visibility="hidden"/>`;
+  svg += `<circle id="xdot" r="4" fill="${seriesDefs[0].color}" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`;
+  svg += `</svg>`;
+  el.innerHTML = svg;
+
+  const node = el.querySelector("svg");
+  const xhair = node.querySelector("#xhair"), xdot = node.querySelector("#xdot");
+  node.addEventListener("mousemove", (ev) => {
+    const rect = node.getBoundingClientRect();
+    const px = ((ev.clientX - rect.left) / rect.width) * W;
+    const i = Math.max(0, Math.min(days.length - 1, Math.round(((px - P.l) / (W - P.l - P.r)) * (days.length - 1))));
+    const d = days[i], v0 = seriesDefs[0].get(d);
+    xhair.setAttribute("x1", x(i)); xhair.setAttribute("x2", x(i)); xhair.setAttribute("visibility", "visible");
+    if (v0 != null) { xdot.setAttribute("cx", x(i)); xdot.setAttribute("cy", y(v0)); xdot.setAttribute("visibility", "visible"); }
+    else xdot.setAttribute("visibility", "hidden");
+    showTip(`<b>${fmtDate(d.date)}</b><br>` + seriesDefs.map((s) => `${s.name}: <b>${s.get(d) ?? "—"}${s.unit || ""}</b>`).join("<br>"), ev);
+  });
+  node.addEventListener("mouseleave", () => { xhair.setAttribute("visibility", "hidden"); xdot.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+// ---- column chart (sleep hours) ----
+function columnChart(el, days) {
+  const W = 560, H = 180, P = { t: 8, r: 8, b: 20, l: 30 };
+  const vals = days.map((d) => d.sleepHours).filter((v) => v != null);
+  if (!vals.length) { el.innerHTML = "<div class='hint'>Sin datos</div>"; return; }
+  const hi = Math.max(9, ...vals);
+  const x = (i) => P.l + (i / days.length) * (W - P.l - P.r);
+  const bw = Math.min(24, ((W - P.l - P.r) / days.length) - 2);
+  const y = (v) => P.t + (1 - v / hi) * (H - P.t - P.b);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  for (let v = 0; v <= hi; v += 3) {
+    svg += `<line x1="${P.l}" y1="${y(v)}" x2="${W - P.r}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>`;
+    svg += `<text x="${P.l - 6}" y="${y(v) + 3}" text-anchor="end">${v}</text>`;
+  }
+  days.forEach((d, i) => {
+    if (d.sleepHours == null) return;
+    const h = (H - P.b) - y(d.sleepHours);
+    const r = Math.min(4, bw / 2, h);
+    svg += `<path class="col" data-i="${i}" fill="var(--series-1)"
+      d="M${x(i)},${H - P.b} v${-(h - r)} q0,${-r} ${r},${-r} h${bw - 2 * r} q${r},0 ${r},${r} v${h - r} z"/>`;
+  });
+  const step = Math.ceil(days.length / 7);
+  days.forEach((d, i) => {
+    if (i % step === 0) svg += `<text x="${x(i) + bw / 2}" y="${H - 4}" text-anchor="middle">${fmtDate(d.date)}</text>`;
+  });
+  svg += `</svg>`;
+  el.innerHTML = svg;
+  el.querySelectorAll(".col").forEach((c) => {
+    c.addEventListener("mousemove", (ev) => {
+      const d = days[+c.dataset.i];
+      const hh = Math.floor(d.sleepHours), mm = Math.round((d.sleepHours - hh) * 60);
+      showTip(`<b>${fmtDate(d.date)}</b><br>Dormiste: <b>${hh}:${String(mm).padStart(2, "0")} h</b><br>Performance: <b>${d.sleepPerformance ?? "—"}%</b><br>Consistencia: <b>${d.sleepConsistency ?? "—"}%</b><br>Eficiencia: <b>${d.sleepEfficiency ?? "—"}%</b>`, ev);
+    });
+    c.addEventListener("mouseleave", hideTip);
+  });
+}
+
+// ---- scatter: strain(d) vs recovery(d+1) ----
+function scatterChart(el, days) {
+  const pts = [];
+  for (let i = 0; i < days.length - 1; i++) {
+    if (days[i].strain != null && days[i + 1].recovery != null) {
+      pts.push({ sx: days[i].strain, ry: days[i + 1].recovery, date: days[i].date });
+    }
+  }
+  if (pts.length < 3) { el.innerHTML = "<div class='hint'>Sin datos suficientes</div>"; return; }
+
+  const mx = pts.reduce((a, p) => a + p.sx, 0) / pts.length;
+  const my = pts.reduce((a, p) => a + p.ry, 0) / pts.length;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (const p of pts) { sxy += (p.sx - mx) * (p.ry - my); sxx += (p.sx - mx) ** 2; syy += (p.ry - my) ** 2; }
+  const r = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+  document.getElementById("corr-hint").textContent =
+    `Correlación r = ${r.toFixed(2)} (${pts.length} pares de días)` +
+    (r < -0.2 ? " — a más strain, peor amaneces" : r > 0.2 ? " — el strain no te está pasando la cuenta" : " — sin relación clara en este período");
+
+  const W = 560, H = 200, P = { t: 8, r: 8, b: 24, l: 34 };
+  const xhi = Math.max(...pts.map((p) => p.sx)) * 1.1;
+  const x = (v) => P.l + (v / xhi) * (W - P.l - P.r);
+  const y = (v) => P.t + (1 - v / 100) * (H - P.t - P.b);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  for (let v = 0; v <= 100; v += 25) {
+    svg += `<line x1="${P.l}" y1="${y(v)}" x2="${W - P.r}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>`;
+    svg += `<text x="${P.l - 6}" y="${y(v) + 3}" text-anchor="end">${v}</text>`;
+  }
+  svg += `<text x="${(W + P.l) / 2}" y="${H - 4}" text-anchor="middle">strain del día</text>`;
+  if (sxx > 0) {
+    const slope = sxy / sxx, x1 = 0, x2 = xhi;
+    const yAt = (vx) => Math.max(0, Math.min(100, my + slope * (vx - mx)));
+    svg += `<line x1="${x(x1)}" y1="${y(yAt(x1))}" x2="${x(x2)}" y2="${y(yAt(x2))}" stroke="var(--baseline)" stroke-width="1"/>`;
+  }
+  pts.forEach((p, i) => {
+    svg += `<circle class="pt" data-i="${i}" cx="${x(p.sx)}" cy="${y(p.ry)}" r="4" fill="var(--series-1)" stroke="var(--surface)" stroke-width="2"/>`;
+  });
+  svg += `</svg>`;
+  el.innerHTML = svg;
+  el.querySelectorAll(".pt").forEach((c) => {
+    c.addEventListener("mousemove", (ev) => {
+      const p = pts[+c.dataset.i];
+      showTip(`<b>${fmtDate(p.date)}</b><br>Strain: <b>${p.sx}</b><br>Recovery día siguiente: <b>${p.ry}%</b>`, ev);
+    });
+    c.addEventListener("mouseleave", hideTip);
+  });
+}
+
+// ---- heatmap ----
+const zoneOf = (r) => (r >= 67 ? ["--zone-good", "Verde"] : r >= 34 ? ["--zone-warn", "Amarilla"] : ["--zone-bad", "Roja"]);
+
+function heatmap(days) {
+  const el = document.getElementById("heatmap");
+  el.innerHTML = "";
+  const first = new Date(days[0].date + "T12:00");
+  let week = document.createElement("div");
+  week.className = "hm-week";
+  for (let i = 0; i < first.getDay(); i++) week.appendChild(Object.assign(document.createElement("div"), { style: "width:14px;height:14px" }));
+  for (const d of days) {
+    const dow = new Date(d.date + "T12:00").getDay();
+    if (dow === 0 && week.childNodes.length) { el.appendChild(week); week = document.createElement("div"); week.className = "hm-week"; }
+    const cell = document.createElement("div");
+    cell.className = "hm-cell";
+    if (d.recovery != null) {
+      const [zone, zoneName] = zoneOf(d.recovery);
+      cell.dataset.v = d.recovery;
+      cell.style.background = css(zone);
+      cell.addEventListener("mousemove", (ev) => showTip(`<b>${fmtDate(d.date)}</b><br>Recovery: <b>${d.recovery}%</b> (zona ${zoneName.toLowerCase()})<br>HRV: <b>${d.hrv ?? "—"} ms</b> · RHR: <b>${d.rhr ?? "—"}</b>`, ev));
+      cell.addEventListener("mouseleave", hideTip);
+    }
+    week.appendChild(cell);
+  }
+  el.appendChild(week);
+  document.getElementById("hm-scale").innerHTML =
+    `<i style="background:var(--zone-bad)"></i> Roja &lt;34% &nbsp; <i style="background:var(--zone-warn)"></i> Amarilla 34–66% &nbsp; <i style="background:var(--zone-good)"></i> Verde ≥67%`;
+}
+
+// ---- tiles + records + table ----
+function tiles(days) {
+  const last = [...days].reverse().find((d) => d.recovery != null) || {};
+  const withRec = days.filter((d) => d.recovery != null);
+  const avg = withRec.length ? Math.round(withRec.reduce((a, d) => a + d.recovery, 0) / withRec.length) : null;
+  const hrvDelta = last.hrv != null && last.hrvBaseline != null ? last.hrv - last.hrvBaseline : null;
+  const lastSleep = [...days].reverse().find((d) => d.sleepHours != null) || {};
+  const hh = lastSleep.sleepHours != null ? Math.floor(lastSleep.sleepHours) : null;
+  const mm = hh != null ? Math.round((lastSleep.sleepHours - hh) * 60) : null;
+  document.getElementById("tiles").innerHTML = `
+    <div class="card tile"><div class="label">Recovery hoy</div><div class="value hero">${last.recovery ?? "—"}%</div>
+      <div class="delta">promedio del período: ${avg ?? "—"}%</div></div>
+    <div class="card tile"><div class="label">HRV hoy</div><div class="value">${last.hrv ?? "—"} <span style="font-size:16px;color:var(--muted)">ms</span></div>
+      <div class="delta ${hrvDelta > 0 ? "good" : ""}">${hrvDelta == null ? "" : (hrvDelta >= 0 ? "+" : "") + hrvDelta + " vs baseline 30d"}</div></div>
+    <div class="card tile"><div class="label">Pulso en reposo</div><div class="value">${last.rhr ?? "—"} <span style="font-size:16px;color:var(--muted)">bpm</span></div>
+      <div class="delta">baseline: ${last.rhrBaseline ?? "—"} bpm</div></div>
+    <div class="card tile"><div class="label">Sueño anoche</div><div class="value">${hh != null ? hh + ":" + String(mm).padStart(2, "0") : "—"}</div>
+      <div class="delta">performance ${lastSleep.sleepPerformance ?? "—"}%</div></div>`;
+}
+
+function records(days) {
+  const withRec = days.filter((d) => d.recovery != null);
+  const best = withRec.reduce((a, d) => (d.recovery > (a?.recovery ?? -1) ? d : a), null);
+  let streak = 0, bestStreak = 0, bestStreakEnd = null;
+  for (const d of days) {
+    if (d.recovery != null && d.recovery >= 67) { streak++; if (streak > bestStreak) { bestStreak = streak; bestStreakEnd = d.date; } }
+    else streak = 0;
+  }
+  const bestSleep = days.filter((d) => d.sleepHours != null).reduce((a, d) => (d.sleepHours > (a?.sleepHours ?? -1) ? d : a), null);
+  const maxStrain = days.filter((d) => d.strain != null).reduce((a, d) => (d.strain > (a?.strain ?? -1) ? d : a), null);
+  const rec = (label, value, when) =>
+    `<div class="record"><div class="label">${label}</div><div class="value">${value}</div><div class="when">${when}</div></div>`;
+  document.getElementById("records").innerHTML =
+    rec("Mejor recovery", best ? best.recovery + "%" : "—", best ? fmtDate(best.date) : "") +
+    rec("Racha de días verdes", bestStreak + (bestStreak === 1 ? " día" : " días"), bestStreakEnd ? "terminó " + fmtDate(bestStreakEnd) : "recovery ≥ 67%") +
+    rec("Noche más larga", bestSleep ? Math.floor(bestSleep.sleepHours) + ":" + String(Math.round((bestSleep.sleepHours % 1) * 60)).padStart(2, "0") + " h" : "—", bestSleep ? fmtDate(bestSleep.date) : "") +
+    rec("Día de más strain", maxStrain ? maxStrain.strain : "—", maxStrain ? fmtDate(maxStrain.date) : "");
+}
+
+function table(days) {
+  const cols = [["Fecha", (d) => d.date], ["Recovery %", (d) => d.recovery], ["HRV", (d) => d.hrv], ["RHR", (d) => d.rhr],
+    ["Resp.", (d) => d.respRate], ["Sueño h", (d) => d.sleepHours], ["Sueño %", (d) => d.sleepPerformance],
+    ["Consist. %", (d) => d.sleepConsistency], ["Efic. %", (d) => d.sleepEfficiency], ["Strain", (d) => d.strain], ["Cal.", (d) => d.calories]];
+  document.getElementById("data-table").innerHTML =
+    `<tr>${cols.map(([h]) => `<th>${h}</th>`).join("")}</tr>` +
+    [...days].reverse().map((d) => `<tr>${cols.map(([, g]) => `<td>${g(d) ?? "—"}</td>`).join("")}</tr>`).join("");
+}
+
+// ---- load & render ----
+async function load(days) {
+  const status = document.getElementById("status");
+  status.textContent = days === "all"
+    ? "Cargando todo tu historial… (la primera vez puede tomar varios minutos, después queda en caché)"
+    : `Cargando ${days} días… (la primera vez toma un rato, después queda en caché)`;
+  const res = await fetch(`/api/days?days=${days}` + (token ? `&token=${encodeURIComponent(token)}` : ""));
+  if (!res.ok) { status.textContent = `Error ${res.status}: ${await res.text()}`; return; }
+  const data = await res.json();
+  status.textContent = "";
+  tiles(data);
+  heatmap(data);
+  lineChart(document.getElementById("chart-recovery"), data,
+    [{ name: "Recovery", unit: "%", color: css("--series-1"), get: (d) => d.recovery }], { yMin: 0, yMax: 100 });
+  lineChart(document.getElementById("chart-hrv"), data, [
+    { name: "HRV", unit: " ms", color: css("--series-1"), get: (d) => d.hrv },
+    { name: "Baseline", unit: " ms", color: css("--baseline"), get: (d) => d.hrvBaseline }]);
+  lineChart(document.getElementById("chart-rhr"), data, [
+    { name: "RHR", unit: " bpm", color: css("--series-1"), get: (d) => d.rhr },
+    { name: "Baseline", unit: " bpm", color: css("--baseline"), get: (d) => d.rhrBaseline }]);
+  scatterChart(document.getElementById("chart-scatter"), data);
+  columnChart(document.getElementById("chart-sleep"), data);
+  records(data);
+  table(data);
+}
+
+document.querySelectorAll(".filters button").forEach((b) =>
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".filters button").forEach((x) => x.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", "true");
+    load(b.dataset.days);
+  })
+);
+load(60);
+</script>
+</body>
+</html>
