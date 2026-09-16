@@ -3,6 +3,7 @@ import express from "express";
 import { createWhoopMcpServer } from "./src/server";
 import { WhoopClient } from "./src/whoop-client";
 import { getDaySummaries, getAllTimeSummaries } from "./src/day-summary";
+import { createJournalStore, dateSchema, entrySchema } from "./src/journal";
 
 const app = express();
 app.use(express.json());
@@ -33,6 +34,16 @@ app.get("/api/days", async (req, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
+    if (req.query.start || req.query.end) {
+      const start = dateSchema.safeParse(req.query.start), end = dateSchema.safeParse(req.query.end);
+      if (!start.success || !end.success || start.data > end.data ||
+          +new Date(end.data) - +new Date(start.data) > 366 * 86400000) {
+        return res.status(400).json({ error: "Rango de fechas inválido (máximo 367 días)" });
+      }
+      const dates: string[] = [];
+      for (let d = +new Date(start.data); d <= +new Date(end.data); d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
+      return res.json(await getDaySummaries(dashboardClient, dates));
+    }
     if (req.query.days === "all") {
       return res.json(await getAllTimeSummaries(dashboardClient));
     }
@@ -47,6 +58,26 @@ app.get("/api/days", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "fetch failed" });
   }
+});
+
+app.get("/dashboard-assets/:file", (req, res) => {
+  if (!["journal.js", "journal.css"].includes(req.params.file)) return res.sendStatus(404);
+  res.sendFile(req.params.file, { root: "./public" });
+});
+const journal = createJournalStore();
+app.get("/api/journal", async (req, res) => {
+  if (!dashboardAuthorized(req)) return res.sendStatus(401);
+  res.setHeader("Cache-Control", "no-store");
+  try { res.json(await journal.read()); }
+  catch { res.status(500).json({ error: "No se pudo leer la bitácora" }); }
+});
+app.put("/api/journal", async (req, res) => {
+  if (!dashboardAuthorized(req)) return res.sendStatus(401);
+  if (!req.is("application/json")) return res.sendStatus(415);
+  const parsed = entrySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Registro inválido", details: parsed.error.flatten() });
+  try { res.json(await journal.upsert(parsed.data)); }
+  catch { res.status(500).json({ error: "No se pudo guardar; vuelve a intentar" }); }
 });
 
 app.post("/mcp", async (req, res) => {

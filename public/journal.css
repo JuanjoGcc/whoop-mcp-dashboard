@@ -1,0 +1,38 @@
+main > *, .grid-2 > * { min-width:0; }
+.journal h2 { font-size: 16px; color: var(--ink); }
+.section-heading,.journal-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+.journal-controls { justify-content:flex-start; }
+.journal button,.journal select,.journal input,.journal textarea { font:inherit; font-size:13px; color:var(--ink); background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:8px 10px; }
+.journal button { cursor:pointer; }
+.journal button:hover,.journal button[aria-pressed="true"] { border-color:var(--series-1); }
+.journal button:focus-visible,.journal input:focus-visible,.journal select:focus-visible { outline:2px solid var(--series-1); outline-offset:2px; }
+.journal button:disabled { opacity:.5; cursor:wait; }
+.journal label { display:grid; gap:5px; font-size:12px; color:var(--ink-2); }
+.journal textarea { width:100%; min-height:80px; }
+.journal .competition-pick { text-align:left; display:grid; gap:6px; }
+.competition-pick strong { font-size:26px; }
+.journal small,.journal .muted { color:var(--muted); font-size:12px; }
+#competition-detail { margin-top:20px; }
+.journal .scroll-table { overflow-x:auto; margin:12px 0; }
+.journal table { white-space:nowrap; }
+.journal td,.journal th { padding:8px; }
+.training-week { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; }
+.training-day { border:1px solid var(--border); border-radius:8px; padding:10px; min-width:0; }
+.training-day h3 { font-size:12px; margin-bottom:8px; }
+.training-day button { display:block; width:100%; margin-top:6px; text-align:left; overflow-wrap:anywhere; }
+.training-day .planned { border-style:dashed; }
+.training-day small { display:block; margin-top:4px; }
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:14px 0; }
+.attempt-row { display:grid; grid-template-columns:28px 1fr 1fr; gap:8px; align-items:center; margin:8px 0; }
+.attempt-row input { width:100%; }
+dialog.journal { margin:auto; padding:24px; border:1px solid var(--border); border-radius:12px; background:var(--surface); color:var(--ink); width:min(560px,94vw); max-height:90vh; overflow:auto; }
+dialog::backdrop { background:rgba(0,0,0,.45); }
+#entry-error { color:var(--zone-bad); margin:10px 0; }
+.sleep-row { display:grid; grid-template-columns:84px 1fr 106px; align-items:center; gap:10px; font-size:12px; margin:8px 0; }
+.sleep-track { position:relative; height:20px; background:var(--page); border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+.sleep-bar { position:absolute; top:3px; height:12px; background:var(--series-1); border-radius:3px; }
+.sleep-axis { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); }
+.event-note { white-space:pre-wrap; font-size:13px; margin:10px 0; overflow-wrap:anywhere; }
+.hm-cell.has-milestone { outline:2px solid var(--ink); outline-offset:1px; cursor:pointer; }
+@media(max-width:800px) { .training-week { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:480px) { .form-grid { grid-template-columns:1fr; } .sleep-row { grid-template-columns:64px 1fr; } .sleep-row>small { grid-column:2; } }
