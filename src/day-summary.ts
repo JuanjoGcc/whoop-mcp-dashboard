@@ -15,6 +15,25 @@ export interface DaySummary {
   strain: number | null;
   strainPct: number | null;
   calories: number | null;
+  sleepStart?: string | null;
+  sleepEnd?: string | null;
+}
+
+export function sleepInterval(home: unknown): { sleepStart: string | null; sleepEnd: string | null } {
+  const sleeps: { start: string; end: string }[] = [];
+  function walk(value: any) {
+    if (!value || typeof value !== "object") return;
+    const c = value.type === "ACTIVITY" ? value.content : null;
+    if (c?.type === "SLEEP" && c.status === "COMPLETE") {
+      const start = c.during?.lower_endpoint, end = c.during?.upper_endpoint;
+      if (Number.isFinite(Date.parse(start)) && Date.parse(end) > Date.parse(start)) sleeps.push({ start, end });
+    }
+    for (const child of Object.values(value)) walk(child);
+  }
+  walk(home);
+  // Main sleep only: naps do not replace the overnight interval.
+  const main = sleeps.sort((a, b) => (Date.parse(b.end) - Date.parse(b.start)) - (Date.parse(a.end) - Date.parse(a.start)))[0];
+  return { sleepStart: main?.start ?? null, sleepEnd: main?.end ?? null };
 }
 
 const CACHE_PATH = ".cache/day-summaries.json";
@@ -107,6 +126,7 @@ async function fetchDay(client: WhoopClient, date: string): Promise<DaySummary |
   }
 
   if (home.status === "fulfilled") {
+    Object.assign(summary, sleepInterval(home.value));
     const live = home.value?.metadata?.whoop_live_metadata;
     if (live?.ms_of_sleep) summary.sleepHours = +(live.ms_of_sleep / 3_600_000).toFixed(2);
     if (live?.calories) summary.calories = Math.round(live.calories);
@@ -135,11 +155,21 @@ export async function getDaySummaries(
 
   const today = new Date().toLocaleDateString("en-CA");
   const missing = dates.filter((d) => !(d in cache) || d === today);
+  const upgrade = dates.filter(d => d !== today && cache[d] && !("sleepStart" in cache[d]!));
 
   // ponytail: fixed pool of 5, enough to stay under Whoop's radar
   const POOL = 5;
   let fetched = 0;
   const changes: Record<string, DaySummary> = {};
+  for (let i = 0; i < upgrade.length; i += POOL) {
+    await Promise.all(upgrade.slice(i, i + POOL).map(async date => {
+      try {
+        Object.assign(cache[date]!, sleepInterval(await client.getHomeData(date)));
+        changes[date] = cache[date]!;
+        fetched++;
+      } catch { /* Keep old metrics; retry the missing interval on the next request. */ }
+    }));
+  }
   for (let i = 0; i < missing.length; i += POOL) {
     const batch = missing.slice(i, i + POOL);
     const results = await Promise.all(batch.map((d) => fetchDay(client, d)));
