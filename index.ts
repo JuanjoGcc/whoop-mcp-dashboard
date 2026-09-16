@@ -3,6 +3,7 @@ import express from "express";
 import { createWhoopMcpServer } from "./src/server";
 import { WhoopClient } from "./src/whoop-client";
 import { getDaySummaries, getAllTimeSummaries } from "./src/day-summary";
+import { createJournalStore, entrySchema } from "./src/journal";
 
 const app = express();
 app.use(express.json());
@@ -47,6 +48,22 @@ app.get("/api/days", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "fetch failed" });
   }
+});
+
+const journal = createJournalStore();
+app.get("/api/journal", async (req, res) => {
+  if (!dashboardAuthorized(req)) return res.sendStatus(401);
+  res.setHeader("Cache-Control", "no-store");
+  try { res.json(await journal.read()); }
+  catch { res.status(500).json({ error: "No se pudo leer la bitácora" }); }
+});
+app.put("/api/journal", async (req, res) => {
+  if (!dashboardAuthorized(req)) return res.sendStatus(401);
+  if (!req.is("application/json")) return res.sendStatus(415);
+  const parsed = entrySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Registro inválido", details: parsed.error.flatten() });
+  try { res.json(await journal.upsert(parsed.data)); }
+  catch { res.status(500).json({ error: "No se pudo guardar; vuelve a intentar" }); }
 });
 
 app.post("/mcp", async (req, res) => {
