@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Whoop Dashboard</title>
+<link rel="stylesheet" href="/dashboard-assets/journal.css">
 <style>
   :root {
     color-scheme: light;
@@ -132,6 +133,22 @@
 
   <div class="tiles" id="tiles"></div>
 
+  <section class="card journal" id="milestones">
+    <div class="section-heading"><div><h2>Hitos y competencias</h2><p class="hint">Tus marcas y cómo llegaste a competir</p></div><button id="add-competition">+ Competencia</button></div>
+    <p id="journal-status" role="status">Cargando bitácora…</p>
+    <div id="competition-list" class="records"></div>
+    <div id="competition-detail"></div>
+  </section>
+  <section class="card journal">
+    <div class="section-heading"><div><h2>Bitácora de entrenamiento</h2><p class="hint">Planifica la semana y registra lo que hiciste</p></div><button id="add-training">+ Sesión</button></div>
+    <div class="journal-controls"><button id="week-prev" aria-label="Semana anterior">←</button><strong id="week-label"></strong><button id="week-next" aria-label="Semana siguiente">→</button><button id="week-today">Esta semana</button></div>
+    <p id="week-summary" class="hint"></p><div id="training-week" class="training-week"></div>
+  </section>
+  <section class="card journal">
+    <div class="section-heading"><div><h2>Horarios de sueño</h2><p class="hint">Sueño principal por fecha de despertar · hora de Santiago · el intervalo incluye despertares</p></div><label>Noches <select id="sleep-range"><option>14</option><option>30</option><option>60</option></select></label></div>
+    <div id="sleep-schedule">Cargando horarios…</div>
+  </section>
+
   <div class="card">
     <h2>Calendario de recovery</h2>
     <div class="hint">Cada celda es un día, coloreada por zona de recovery</div>
@@ -240,6 +257,8 @@
 </main>
 
 <div id="tooltip"></div>
+<dialog id="entry-dialog" class="journal"><form id="entry-form"><div id="entry-fields"></div><p id="entry-error" role="alert"></p><div class="journal-controls"><button type="submit">Guardar</button><button type="button" id="entry-cancel">Cancelar</button></div></form></dialog>
+<script src="/dashboard-assets/journal.js" defer></script>
 
 <script>
 const token = new URLSearchParams(location.search).get("token");
@@ -413,6 +432,7 @@ function heatmap(days) {
     if (dow === 0 && week.childNodes.length) { el.appendChild(week); week = document.createElement("div"); week.className = "hm-week"; }
     const cell = document.createElement("div");
     cell.className = "hm-cell";
+    cell.dataset.date = d.date;
     if (d.recovery != null) {
       const [zone, zoneName] = zoneOf(d.recovery);
       cell.dataset.v = d.recovery;
@@ -850,10 +870,13 @@ async function load(days) {
   const res = await fetch(`/api/days?days=${days}` + (token ? `&token=${encodeURIComponent(token)}` : ""));
   if (!res.ok) { status.textContent = `Error ${res.status}: ${await res.text()}`; return; }
   const data = await res.json();
+  window.dashboardDays = data;
+  window.dispatchEvent(new CustomEvent("dashboard-days", { detail: data }));
   status.textContent = "";
   todayCard(data);
   tiles(data);
   heatmap(data);
+  window.dispatchEvent(new CustomEvent("dashboard-calendar"));
   weekZones(document.getElementById("chart-weeks"), data);
   lineChart(document.getElementById("chart-recovery"), data,
     [{ name: "Recovery", unit: "%", color: css("--series-1"), get: (d) => d.recovery }], { yMin: 0, yMax: 100 });

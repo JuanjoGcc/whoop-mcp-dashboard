@@ -220,6 +220,23 @@ A local web dashboard is available at `/dashboard?token=<MCP_AUTH_TOKEN>`. It re
 
 See [`docs/ESTADISTICA.md`](docs/ESTADISTICA.md) for a detailed explanation of every statistic — what each means, which values are good or bad, and how to use them to decide daily training load.
 
+## Competition milestones and training journal
+
+The dashboard also shows a daily decision card (the decision tree of
+[`docs/ESTADISTICA.md`](docs/ESTADISTICA.md) applied to today's metrics), editable competition
+attempts with lead-in comparisons aligned to competition day, a weekly training journal
+(planned/completed, duration, perceived effort, notes), and main-sleep timing in
+`America/Santiago`. Sleep bars show the recorded interval, which can include awake time,
+rather than total hours asleep.
+
+Personal entries are persisted in `data/journal.json`, excluded from Git. Back that directory
+up separately; a deployment needs a persistent volume for `data/`.
+
+The authenticated dashboard API adds `GET/PUT /api/journal` (PUT upserts one entry) and
+`GET /api/days?start=YYYY-MM-DD&end=YYYY-MM-DD` (up to 367 days).
+
+Run local validation with `bun test` and `bunx tsc --noEmit`.
+
 ## Available Tools
 
 The server provides five main tools for accessing your Whoop data:

@@ -60,6 +60,10 @@ app.get("/api/days", async (req, res) => {
   }
 });
 
+app.get("/dashboard-assets/:file", (req, res) => {
+  if (!["journal.js", "journal.css"].includes(req.params.file)) return res.sendStatus(404);
+  res.sendFile(req.params.file, { root: "./public" });
+});
 const journal = createJournalStore();
 app.get("/api/journal", async (req, res) => {
   if (!dashboardAuthorized(req)) return res.sendStatus(401);
