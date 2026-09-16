@@ -3,7 +3,7 @@ import express from "express";
 import { createWhoopMcpServer } from "./src/server";
 import { WhoopClient } from "./src/whoop-client";
 import { getDaySummaries, getAllTimeSummaries } from "./src/day-summary";
-import { createJournalStore, entrySchema } from "./src/journal";
+import { createJournalStore, dateSchema, entrySchema } from "./src/journal";
 
 const app = express();
 app.use(express.json());
@@ -34,6 +34,16 @@ app.get("/api/days", async (req, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
+    if (req.query.start || req.query.end) {
+      const start = dateSchema.safeParse(req.query.start), end = dateSchema.safeParse(req.query.end);
+      if (!start.success || !end.success || start.data > end.data ||
+          +new Date(end.data) - +new Date(start.data) > 366 * 86400000) {
+        return res.status(400).json({ error: "Rango de fechas inválido (máximo 367 días)" });
+      }
+      const dates: string[] = [];
+      for (let d = +new Date(start.data); d <= +new Date(end.data); d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
+      return res.json(await getDaySummaries(dashboardClient, dates));
+    }
     if (req.query.days === "all") {
       return res.json(await getAllTimeSummaries(dashboardClient));
     }
