@@ -32,7 +32,7 @@ export function registerRecoveryTools(
             id: z.string(),
             title: z.string(),
             value: z.string(),
-            baseline: z.string(),
+            baseline: z.string().nullable(),
             status: z.string(),
             icon: z.string(),
           })

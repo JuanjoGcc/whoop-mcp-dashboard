@@ -22,7 +22,7 @@ export function registerHomeTools(server: McpServer, whoopClient: WhoopClient) {
           cycleId: z.number(),
           cycleDay: z.string(),
           cycleDateDisplay: z.string(),
-          sleepState: z.string(),
+          sleepState: z.string().nullable(),
         }),
         liveMetrics: z.object({
           recoveryScore: z.number(),
@@ -58,7 +58,7 @@ export function registerHomeTools(server: McpServer, whoopClient: WhoopClient) {
           z.object({
             title: z.string(),
             currentValue: z.string(),
-            thirtyDayAverage: z.string(),
+            thirtyDayAverage: z.string().nullable(),
             state: z.string(),
           })
         ),
