@@ -18,6 +18,18 @@ export interface DaySummary {
 }
 
 const CACHE_PATH = ".cache/day-summaries.json";
+let cacheWrites: Promise<unknown> = Promise.resolve();
+
+function persistSummaries(changes: Record<string, DaySummary>) {
+  const write = cacheWrites.then(async () => {
+    const file = Bun.file(CACHE_PATH);
+    let latest: Record<string, DaySummary> = {};
+    if (await file.exists()) { try { latest = await file.json(); } catch {} }
+    await Bun.write(CACHE_PATH, JSON.stringify({ ...latest, ...changes }));
+  });
+  cacheWrites = write.catch(() => {});
+  return write;
+}
 
 function num(s: unknown): number | null {
   if (typeof s !== "string" && typeof s !== "number") return null;
@@ -36,7 +48,7 @@ function contributor(tile: any, id: string): any {
   return tile?.metrics?.find((m: any) => m.id === id);
 }
 
-async function fetchDay(client: WhoopClient, date: string): Promise<DaySummary> {
+async function fetchDay(client: WhoopClient, date: string): Promise<DaySummary | null> {
   const summary: DaySummary = {
     date,
     recovery: null,
@@ -61,6 +73,9 @@ async function fetchDay(client: WhoopClient, date: string): Promise<DaySummary> 
     client.getStrainDeepDive(date),
     client.getHomeData(date),
   ]);
+
+  // All four rejected means token or network, not a day without data: do not cache the failure.
+  if ([recovery, sleep, strain, home].every((r) => r.status === "rejected")) return null;
 
   if (recovery.status === "fulfilled") {
     const gauge = findTile(recovery.value, "SCORE_GAUGE");
@@ -123,14 +138,17 @@ export async function getDaySummaries(
 
   // ponytail: fixed pool of 5, enough to stay under Whoop's radar
   const POOL = 5;
+  let fetched = 0;
+  const changes: Record<string, DaySummary> = {};
   for (let i = 0; i < missing.length; i += POOL) {
     const batch = missing.slice(i, i + POOL);
     const results = await Promise.all(batch.map((d) => fetchDay(client, d)));
-    for (const r of results) cache[r.date] = r;
+    for (const r of results) if (r) { cache[r.date] = r; changes[r.date] = r; }
+    fetched += results.filter(Boolean).length;
   }
 
-  if (missing.length > 0) {
-    await Bun.write(CACHE_PATH, JSON.stringify(cache));
+  if (fetched > 0) {
+    await persistSummaries(changes);
   }
 
   return dates.map((d) => cache[d]).filter((d): d is DaySummary => Boolean(d));
